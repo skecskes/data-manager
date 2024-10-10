@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-
+use std::sync::{Arc, RwLock};
 
 pub type DatasetId = [u8; 32];
 pub type ChunkId = [u8; 32];
@@ -28,12 +28,16 @@ pub trait DataManager: Send + Sync {
     /// When `data_dir` is not empty, this method should create a list of fully downloaded chunks
     /// and use it as initial state.
     fn new(data_dir: PathBuf) -> Self;
+
     /// Schedule `chunk` download in background
     fn download_chunk(&self, chunk: DataChunk);
-    // List chunks, that are currently available
+
+    /// List chunks, that are currently available
     fn list_chunks(&self) -> Vec<ChunkId>;
+
     /// Find a chunk from a given dataset, that is responsible for `block_number`.
     fn find_chunk(&self, dataset_id: [u8; 32], block_number: u64) -> Option<impl DataChunkRef>;
+
     /// Schedule data chunk for deletion in background
     fn delete_chunk(&self, chunk_id: [u8; 32]);
 }
@@ -43,4 +47,18 @@ pub trait DataManager: Send + Sync {
 pub trait DataChunkRef: Send + Sync + Clone {
     // Data chunk directory
     fn path(&self) -> &Path;
+}
+
+#[derive(Clone)]
+pub struct DataChunkRefImpl {
+    path: Arc<RwLock<PathBuf>>,
+}
+
+impl DataChunkRef for DataChunkRefImpl {
+    fn path(&self) -> &Path {
+        match self.path.read() {
+            Ok(guard) => &*guard,
+            Err(_) => panic!("Failed to acquire read lock on path"),
+        }
+    }
 }

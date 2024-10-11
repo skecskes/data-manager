@@ -43,7 +43,7 @@ pub trait DataManager: Send + Sync {
     fn new(data_dir: PathBuf) -> Self;
     /// Schedule `chunk` download in background
     fn download_chunk(&self, chunk: DataChunk);
-    // List chunks, that are currently available
+    /// List chunks, that are currently available
     fn list_chunks(&self) -> Vec<ChunkId>;
     /// Find a chunk from a given dataset, that is responsible for `block_number`.
     fn find_chunk(&self, dataset_id: DatasetId, block_number: u64) -> Option<impl DataChunkRef>;

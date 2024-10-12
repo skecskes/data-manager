@@ -15,7 +15,7 @@ pub trait DataManager: Send + Sync {
     fn list_chunks(&self) -> Vec<ChunkId>;
 
     /// Find a chunk from a given dataset, that is responsible for `block_number`.
-    fn find_chunk(&self, dataset_id: DatasetId, block_number: u64) -> Option<impl DataChunkRef>;
+    fn find_chunk(&self, dataset_id: DatasetId, block_number: u64) -> Option<DataChunk>;
 
     /// Schedule data chunk for deletion in background
     fn delete_chunk(&self, chunk_id: ChunkId);

@@ -1,6 +1,6 @@
 use std::sync::{Arc, RwLock};
 use futures::executor::ThreadPool;
-use crate::iooperation::TaskWaker;
+use crate::io_operation::TaskWaker;
 
 pub struct TasksManager {
     pool_managing_async_tasks: ThreadPool,
@@ -23,7 +23,7 @@ impl TasksManager {
         let shared_waker = Arc::new(RwLock::new(TaskWaker { waker: None }));
         
         // the future
-        let io_operation = crate::iooperation::IOOperation {
+        let io_operation = crate::io_operation::IOOperation {
             task_waker: shared_waker.clone(),
         };
 

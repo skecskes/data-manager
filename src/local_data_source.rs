@@ -39,7 +39,6 @@ impl LocalDataSource {
 
     /// Download the all the chunks to the data_dir as one chunk_id file
     pub fn download_chunk(data_dir: PathBuf, chunk: DataChunk) -> String {
-        
         // Simulate downloading the chunk by waiting for 100ms
         thread::sleep(Duration::from_millis(100));
         let chunk_id = hex::encode(chunk.id);
@@ -52,6 +51,15 @@ impl LocalDataSource {
             chunk_id,
             data_dir.display()
         )
+    }
+    
+    pub fn delete_chunk(data_dir: PathBuf, chunk_id: ChunkId) -> String {
+        // Simulate deleting the chunk by waiting for 100ms
+        thread::sleep(Duration::from_millis(100));
+        let chunk_id = hex::encode(chunk_id);
+        let file_path = data_dir.join(&chunk_id);
+        fs::remove_file(file_path).expect("Failed to remove file");
+        format!("Deleting the chunk {} from {} has completed", chunk_id, data_dir.display())
     }
 }
 

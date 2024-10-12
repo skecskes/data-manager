@@ -2,6 +2,8 @@ use crate::data_chunk::{ChunkId, DataChunk};
 use std::path::PathBuf;
 use std::time::Duration;
 use std::{fs, thread};
+use std::collections::HashMap;
+use crate::ChunkStatus;
 
 #[derive(Clone)]
 pub struct LocalDataSource {
@@ -13,8 +15,8 @@ impl LocalDataSource {
         LocalDataSource { data_dir }
     }
 
-    pub fn list_existing_chunk_ids(&self) -> Vec<ChunkId> {
-        let mut chunk_ids = Vec::new();
+    pub fn list_existing_chunk_ids(&self) -> HashMap<ChunkId, ChunkStatus> {
+        let mut chunk_ids = HashMap::new();
 
         if let Ok(entries) = fs::read_dir(&self.data_dir) {
             for entry in entries.flatten() {
@@ -24,7 +26,7 @@ impl LocalDataSource {
                             if chunk_id.len() == 32 {
                                 let mut chunk_id_array = [0u8; 32];
                                 chunk_id_array.copy_from_slice(&chunk_id);
-                                chunk_ids.push(chunk_id_array);
+                                chunk_ids.insert(chunk_id_array, ChunkStatus::Ready);
                             }
                         }
                     }
@@ -38,7 +40,7 @@ impl LocalDataSource {
     /// Download the all the chunks to the data_dir as one chunk_id file
     pub fn download_chunk(data_dir: PathBuf, chunk: DataChunk) -> String {
         
-        // TODO: Simulate downloading the chunk
+        // Simulate downloading the chunk by waiting for 100ms
         thread::sleep(Duration::from_millis(100));
         let chunk_id = hex::encode(chunk.id);
         // create file with name chunk_id in data_dir
@@ -68,32 +70,28 @@ mod tests {
         let ds = LocalDataSource::new(PathBuf::from("./test_data_dir"));
         let chunk_ids = ds.list_existing_chunk_ids();
         assert_eq!(chunk_ids.len(), 4);
-        assert_eq!(chunk_ids[0], [0u8; 32]);
+        assert!(chunk_ids.contains_key(&[0u8; 32]));
+        assert_eq!(chunk_ids.get(&[0u8; 32]), Some(&ChunkStatus::Ready));
+        
+        assert!(chunk_ids.contains_key(&[17; 32]));
+        assert_eq!(chunk_ids.get(&[17; 32]), Some(&ChunkStatus::Ready));
         assert_eq!(
-            chunk_ids[1],
-            [
-                17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
-                17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17
-            ]
-        );
-        assert_eq!(
-            chunk_ids[2],
-            [
+            chunk_ids.get(&[
                 123, 94, 164, 195, 214, 231, 248, 169, 176, 193, 210, 227, 244, 165, 182, 199, 216,
                 233, 240, 161, 178, 195, 212, 229, 246, 167, 184, 201, 208, 225, 242, 163
             ]
-        );
+        ), Some(&ChunkStatus::Ready));
         assert_eq!(
-            chunk_ids[3],
-            [
+            chunk_ids.get(&[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
                 23, 24, 25, 26, 27, 28, 29, 30, 31
             ]
-        );
+        ), Some(&ChunkStatus::Ready));
     }
     
     #[test]
     fn test_download_chunk() {
+        // Arrange
         let ds = LocalDataSource::new(PathBuf::from("./test_data_dir"));
         let chunk = DataChunk {
             id: [5u8; 32],
@@ -101,17 +99,21 @@ mod tests {
             block_range: 0..0,
             files: Default::default(),
         };
+        
+        // Act
         let result = LocalDataSource::download_chunk(ds.data_dir.clone(), chunk.clone());
         assert_eq!(
             result,
             "Downloading the chunk 0505050505050505050505050505050505050505050505050505050505050505 to ./test_data_dir has completed"
         );
         
+        // Assert
         let chunk_ids = ds.list_existing_chunk_ids();
         assert_eq!(chunk_ids.len(), 5);
         
         let chunk_id = hex::encode(chunk.id);
-        assert_eq!(chunk_ids[2], chunk.id);
+        assert!(chunk_ids.contains_key(&chunk.id));
+        assert_eq!(chunk_ids.get(&chunk.id), Some(&ChunkStatus::Ready));
         
         let file_path = ds.data_dir.join(&chunk_id);
         assert!(file_path.exists());

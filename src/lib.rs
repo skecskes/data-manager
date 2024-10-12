@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -12,9 +13,17 @@ mod local_data_source;
 mod iooperation;
 mod event_loop;
 
+#[derive(Debug, Clone)]
+#[derive(PartialEq)]
+pub enum ChunkStatus {
+    Downloading,
+    Ready,
+    Deleting,
+}
+
 pub struct DataManagerImpl {
     pub data_source: LocalDataSource,
-    pub chunk_ids: Arc<Mutex<Vec<ChunkId>>>,
+    pub chunk_ids: Arc<Mutex<HashMap<ChunkId, ChunkStatus>>>,
     pub tasks_manager: TasksManager,
 }
 
@@ -30,14 +39,23 @@ impl DataManager for DataManagerImpl {
 
     /// Schedule `chunk` download in background
     fn download_chunk(&self, chunk: DataChunk) {
-        let state = self.tasks_manager.add_future_to_manager_pool();
+        let task_waker = self.tasks_manager.add_future_to_manager_pool();
         let data_dir = self.data_source.data_dir.clone();
-        let chunk_ids: Arc<Mutex<Vec<ChunkId>>> = Arc::clone(&self.chunk_ids);
-        let worker_thread = thread::spawn(move || {
+        let chunk_ids: Arc<Mutex<HashMap<ChunkId, ChunkStatus>>> = Arc::clone(&self.chunk_ids);
+        {
             let mut chunk_ids = chunk_ids.lock().unwrap();
+            if chunk_ids.contains_key(&chunk.id) {
+                // don't download the chunk if it's already being processed
+                return;
+            }
+            chunk_ids.insert(chunk.id, ChunkStatus::Downloading);
+        }
+        let worker_thread = thread::spawn(move || {
             let result = LocalDataSource::download_chunk(data_dir, chunk.clone());
-            TasksManager::wake_the_future(state);
-            chunk_ids.push(chunk.id);
+            TasksManager::wake_the_future(task_waker);
+            
+            let mut chunk_ids = chunk_ids.lock().unwrap();
+            chunk_ids.insert(chunk.id, ChunkStatus::Ready);
             result
         });
         
@@ -48,7 +66,7 @@ impl DataManager for DataManagerImpl {
     }
 
     fn list_chunks(&self) -> Vec<ChunkId> {
-        self.chunk_ids.lock().unwrap().clone()
+        self.chunk_ids.lock().unwrap().keys().cloned().collect()
     }
 
     fn find_chunk(&self, dataset_id: DatasetId, block_number: u64) -> Option<DataChunk> {
@@ -70,7 +88,7 @@ mod tests {
         let dm = DataManagerImpl::new(PathBuf::from("./test_data_dir"));
         let chunk_ids = dm.chunk_ids.lock().unwrap();
         assert_eq!(chunk_ids.len(), 4);
-        assert_eq!(chunk_ids[0], [0u8; 32]);
+        assert_eq!(chunk_ids.contains_key(&[0u8; 32]), true);
     }
 
     #[test]
@@ -82,22 +100,70 @@ mod tests {
 
     #[test]
     fn test_download_new_chunk() {
-        let dm = DataManagerImpl::new(PathBuf::from("./test_data_dir"));
+        
+        // Arrange
+        let data_manager = DataManagerImpl::new(PathBuf::from("./test_data_dir"));
         let chunk = DataChunk {
             id: [5u8; 32],
             dataset_id: [0u8; 32],
             block_range: 0..0,
             files: Default::default()
         };
-        dm.download_chunk(chunk.clone());
-
+        {
+            let chunk_ids = data_manager.chunk_ids.lock().unwrap();
+            assert_eq!(chunk_ids.len(), 4);
+        }
+        
+        // Act
+        data_manager.download_chunk(chunk.clone());
+        
+        // Assert
+        {
+            let chunk_ids = data_manager.chunk_ids.lock().unwrap();
+            assert_eq!(chunk_ids.contains_key(&[5u8; 32]), true);
+            assert_eq!(chunk_ids.get(&[5u8; 32]), Some(&ChunkStatus::Downloading));
+        }
+        // wait for the download to complete before asserting anything
         futures::executor::block_on(async {
             thread::sleep(std::time::Duration::from_millis(300));
         });
         
+        // Assert
+        // check if the chunk was added to the list of chunks
+        let chunk_ids = data_manager.chunk_ids.lock().unwrap();
+        assert_eq!(chunk_ids.len(), 5);
+        assert_eq!(chunk_ids.contains_key(&[5u8; 32]), true);
+        assert_eq!(chunk_ids.get(&[5u8; 32]), Some(&ChunkStatus::Ready));
+        
         let chunk_id = hex::encode(chunk.id);
-        let file_path = dm.data_source.data_dir.join(&chunk_id);
+        let file_path = data_manager.data_source.data_dir.join(&chunk_id);
         fs::remove_file(file_path).expect("Failed to remove file");
+    }
+    
+    #[test]
+    fn test_download_existing_chunk_() {
+        // Arrange
+        let data_manager = DataManagerImpl::new(PathBuf::from("./test_data_dir"));
+        let chunk = DataChunk {
+            id: [0u8; 32],
+            dataset_id: [0u8; 32],
+            block_range: 0..0,
+            files: Default::default()
+        };
+        {
+            let chunk_ids = data_manager.chunk_ids.lock().unwrap();
+            assert_eq!(chunk_ids.len(), 4);
+        }
+        
+        // Act
+        data_manager.download_chunk(chunk.clone());
+        futures::executor::block_on(async {
+            thread::sleep(std::time::Duration::from_millis(300));
+        });
+        
+        // Assert
+        let chunk_ids = data_manager.chunk_ids.lock().unwrap();
+        assert_eq!(chunk_ids.len(), 4);
     }
 }
 

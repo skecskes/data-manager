@@ -1,8 +1,7 @@
 use crate::data_chunk::{ChunkId, DataChunk};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::{fs, thread};
-use crate::ChunkStatus;
 use crate::data_catalogue::DataCatalogue;
 
 #[derive(Clone)]
@@ -17,9 +16,9 @@ impl LocalDataSource {
     
     pub fn read_local_chunks(&self) -> Vec<ChunkId> {
         let mut chunks = Vec::new();
-       
+
         // chunk id is concatenated dataset_id and block_range hashed with sha256 into [u8; 32]
-        
+
         if let Ok(entries) = fs::read_dir(&self.data_dir) {
             for entry in entries.flatten() {
                 if let Ok(main_directory) = entry.file_name().into_string() {
@@ -27,39 +26,38 @@ impl LocalDataSource {
                         for dataset_directory in entry.path().read_dir().unwrap() {
                             if let Ok(block_range_directory) = dataset_directory.unwrap().file_name().into_string() {
                                 if block_range_directory.contains("=") {
-                                    let dataset = hex::decode(main_directory.split("=").collect::<Vec<&str>>()[1]).unwrap();
-                                    let dataset_id = dataset.as_slice().try_into().unwrap();
-                                    let block_range = block_range_directory.split("=").collect::<Vec<&str>>()[1];
-                                    let block_start = block_range.split("_").collect::<Vec<&str>>()[0].parse::<u64>().unwrap();
-                                    let block_end = block_range.split("_").collect::<Vec<&str>>()[1].parse::<u64>().unwrap();
-                                    
-                                    let chunk_id = DataCatalogue::get_chunk_id_from_dataset_and_block_range(dataset_id, block_start..block_end);
+                                    let dataset_id_str = main_directory.split("=").nth(1).unwrap();
+                                    let dataset_id_vec = hex::decode(dataset_id_str).unwrap();
+                                    let mut dataset_id = [0u8; 32];
+                                    dataset_id.copy_from_slice(&dataset_id_vec);
+
+                                    let block_range = block_range_directory.split("=").nth(1).unwrap();
+                                    let mut parts = block_range.split('_');
+                                    let block_start = parts.next().unwrap().parse::<u64>().unwrap();
+                                    let block_end = parts.next().unwrap().parse::<u64>().unwrap();
+                                    let range = block_start..block_end;
+                                    let chunk_id = DataCatalogue::get_chunk_id_from_dataset_and_block_range(&dataset_id, &range);
                                     chunks.push(chunk_id);
                                 }
                             }
-                            
+
                         }
                     }
                 }
             }
         }
-        
+
         
         chunks
     }
 
     /// Download the all the chunks to the data_dir as one chunk_id file
     pub fn download_chunk(data_dir: PathBuf, chunk: DataChunk) -> String {
-        // Simulate downloading the chunk by waiting for 100ms
-        thread::sleep(Duration::from_millis(100));
-        let chunk_id = hex::encode(chunk.id);
-        // create file with name chunk_id in data_dir
-        let file_path = data_dir.join(&chunk_id);
-        fs::write(file_path, b"").expect("Failed to write file");
-        
+
+        simulate_downloading_chunk(data_dir.clone(), chunk.clone());
         format!(
-            "Downloading the chunk {} to {} has completed",
-            chunk_id,
+            "Downloading the chunk {:?} to {} has completed",
+            chunk.id,
             data_dir.display()
         )
     }
@@ -76,6 +74,7 @@ impl LocalDataSource {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use super::*;
 
     #[test]
@@ -89,7 +88,7 @@ mod tests {
         // Act
         let ds = LocalDataSource::new(PathBuf::from("./local_data_dir"));
         let chunk_ids = ds.read_local_chunks();
-        
+
         // Assert
         assert_eq!(chunk_ids.len(), 8);
         assert_eq!(chunk_ids[0], [147, 161, 202, 94, 141, 129, 235, 161, 211, 123, 214, 159, 212, 119, 7, 59, 107, 144, 48, 224, 108, 245, 142, 139, 2, 173, 240, 231, 54, 58, 115, 159]);
@@ -100,38 +99,83 @@ mod tests {
         assert_eq!(chunk_ids[5], [47, 214, 124, 127, 237, 100, 240, 96, 40, 147, 96, 68, 104, 154, 218, 127, 165, 181, 128, 44, 47, 16, 60, 172, 24, 208, 88, 136, 149, 79, 243, 191]);
         assert_eq!(chunk_ids[6], [56, 24, 248, 27, 82, 241, 162, 191, 1, 219, 253, 77, 160, 250, 121, 88, 143, 116, 109, 77, 123, 216, 197, 83, 201, 51, 240, 120, 186, 231, 249, 76]);
         assert_eq!(chunk_ids[7], [168, 77, 161, 67, 100, 46, 30, 66, 3, 236, 122, 88, 18, 185, 131, 120, 153, 130, 152, 113, 236, 29, 91, 3, 244, 6, 254, 177, 61, 66, 182, 178]);
-        
+
     }
-    
+
     #[test]
     fn test_download_chunk() {
         // Arrange
         let ds = LocalDataSource::new(PathBuf::from("./local_data_dir"));
+        let dataset_id_str = "1111111111111111111111111111111111111111111111111111111111111111";
+        let dataset_id_vec = hex::decode(dataset_id_str).unwrap();
+        let mut dataset_id = [0u8; 32];
+        dataset_id.copy_from_slice(&dataset_id_vec);
+
+        let block_range = 95..106;
+        let chunk_id = DataCatalogue::get_chunk_id_from_dataset_and_block_range(&dataset_id, &block_range);
         let chunk = DataChunk {
-            id: [5u8; 32],
-            dataset_id: [0u8; 32],
-            block_range: 0..0,
-            files: Default::default(),
+            id: chunk_id,
+            dataset_id: dataset_id,
+            block_range: block_range,
+            files: HashMap::from([
+                ("part-1.parquet".to_string(), "https://example.com/par-1.parquet".to_string()),
+                ("part-2.parquet".to_string(), "https://example.com/par-2.parquet".to_string()),
+                ("part-3.parquet".to_string(), "https://example.com/par-3.parquet".to_string()),
+            ]),
         };
-        
+
         // Act
         let result = LocalDataSource::download_chunk(ds.data_dir.clone(), chunk.clone());
+
+        // Assert
         assert_eq!(
             result,
-            "Downloading the chunk 0505050505050505050505050505050505050505050505050505050505050505 to ./local_data_dir has completed"
+            "Downloading the chunk [170, 13, 118, 225, 28, 2, 234, 149, 141, 239, 145, 9, 120, 116, 116, 137, 16, 29, 106, 129, 18, 70, 73, 152, 183, 85, 25, 49, 33, 116, 247, 65] to ./local_data_dir has completed"
         );
-        
-        // Assert
+
         let chunk_ids = ds.read_local_chunks();
-        assert_eq!(chunk_ids.len(), 5);
-        
-        let chunk_id = hex::encode(chunk.id);
-        assert!(chunk_ids.contains_key(&chunk.id));
-        assert_eq!(chunk_ids.get(&chunk.id), Some(&ChunkStatus::Ready));
-        
-        let file_path = ds.data_dir.join(&chunk_id);
-        assert!(file_path.exists());
-        
-        fs::remove_file(file_path).expect("Failed to remove file");
+        assert_eq!(chunk_ids.len(), 9);
+
+        assert!(chunk_ids.contains(&chunk.id));
+
+        simulate_deleting_chunk(&ds.data_dir.clone(), &chunk.id);
     }
+}
+
+fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
+    if !dst.exists() {
+        fs::create_dir(dst)?;
+    }
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_all(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    Ok(())
+}
+
+/// Simulate downloading the chunk taking 100ms
+fn simulate_downloading_chunk(data_dir: PathBuf, chunk: DataChunk) {
+    thread::sleep(Duration::from_millis(100));
+    if chunk.dataset_id == [1u8; 32] && chunk.block_range.start == 95 && chunk.block_range.end == 106 {
+        copy_dir_all(
+            Path::new("./remote_data_dir/dataset_id=1111111111111111111111111111111111111111111111111111111111111111/block_range=95_106"),
+            Path::new(&format!("{}/dataset_id=1111111111111111111111111111111111111111111111111111111111111111/block_range=95_106", data_dir.display()))
+        ).expect("Failed to copy directory");
+    };
+}
+
+fn simulate_deleting_chunk(data_dir: &PathBuf, chunk_id: &ChunkId) {
+    thread::sleep(Duration::from_millis(100));
+    if chunk_id.eq(&[170, 13, 118, 225, 28, 2, 234, 149, 141, 239, 145, 9, 120, 116, 116, 137, 16, 29, 106, 129, 18, 70, 73, 152, 183, 85, 25, 49, 33, 116, 247, 65]) {
+        fs::remove_dir_all(
+                      Path::new(&format!("{}/dataset_id=1111111111111111111111111111111111111111111111111111111111111111/block_range=95_106", data_dir.display()))
+        ).expect("Failed to remove directory");
+    };
 }

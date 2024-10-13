@@ -25,6 +25,15 @@ impl DataCatalogue {
         catalogue
     }
 
+    pub fn get_chunk_id_from_dataset_and_block_range(dataset_id: &DatasetId, block_range: Range<u64>) -> ChunkId {
+        let dataset = hex::encode(dataset_id);
+        let chunk_id = format!("{}{}{}",dataset, block_range.start, block_range.end);
+        let chunk_id = hex::decode(sha256::digest(chunk_id.as_bytes())).unwrap();
+        let mut chunk_id_array = [0u8; 32];
+        chunk_id_array.copy_from_slice(&chunk_id);
+        chunk_id_array
+    }
+    
     pub fn add_chunk(&mut self, chunk: DataChunk) {
         self.chunks_by_id.insert(chunk.id, chunk.clone());
         self.chunks_by_dataset

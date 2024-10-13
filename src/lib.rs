@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use crate::data_catalogue::DataCatalogue;
-use crate::data_chunk::{ChunkId, DataChunk, DatasetId};
+use crate::data_chunk::{ChunkId, DataChunk, DataChunkRef, DatasetId};
 use crate::data_manager::DataManager;
 use crate::event_loop::TasksManager;
 use crate::local_data_source::LocalDataSource;
@@ -34,12 +34,13 @@ impl DataManager for DataManagerImpl {
     fn new(data_dir: PathBuf) -> Self {
         let data_source = LocalDataSource::new(data_dir);
         let local_data_chunks = data_source.read_local_chunks();
-        let chunk_ids = local_data_chunks.iter().map(|chunk| (chunk.id, ChunkStatus::Ready)).collect();
+                
+        // todo: read the chunks from the data_dir 
         DataManagerImpl {
-            chunk_ids: Arc::new(Mutex::new(chunk_ids)),
+            chunk_ids: Arc::new(Mutex::new(HashMap::new())),
             data_source,
             tasks_manager: TasksManager::default(),
-            data_catalogue: DataCatalogue::new(local_data_chunks),
+            data_catalogue: DataCatalogue::new(Vec::new()),
         }
     }
 
@@ -85,7 +86,13 @@ impl DataManager for DataManagerImpl {
     }
 
     fn find_chunk(&self, dataset_id: DatasetId, block_number: u64) -> Option<impl DataChunkRef> {
-        unimplemented!()
+        // TODO: unimplemented!()
+        Some(DataChunk {
+            id: [0u8; 32],
+            dataset_id: [0u8; 32],
+            block_range: 0..0,
+            files: Default::default(),
+        })
     }
 
     fn delete_chunk(&self, chunk_id: ChunkId) {
@@ -122,7 +129,7 @@ mod tests {
 
     #[test]
     fn test_instantiate_data_manager() {
-        let dm = DataManagerImpl::new(PathBuf::from("./test_data_dir"));
+        let dm = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
         let chunk_ids = dm.chunk_ids.lock().unwrap();
         assert_eq!(chunk_ids.len(), 4);
         assert!(chunk_ids.contains_key(&[0u8; 32]));
@@ -130,7 +137,7 @@ mod tests {
 
     #[test]
     fn test_list_chunks() {
-        let dm = DataManagerImpl::new(PathBuf::from("./test_data_dir"));
+        let dm = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
         let chunk_ids = dm.list_chunks();
         assert_eq!(chunk_ids.len(), 4);
     }
@@ -139,7 +146,7 @@ mod tests {
     fn test_download_new_chunk() {
 
         // Arrange
-        let data_manager = DataManagerImpl::new(PathBuf::from("./test_data_dir"));
+        let data_manager = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
         let chunk = DataChunk {
             id: [5u8; 32],
             dataset_id: [0u8; 32],
@@ -180,7 +187,7 @@ mod tests {
     #[test]
     fn test_download_existing_chunk() {
         // Arrange
-        let data_manager = DataManagerImpl::new(PathBuf::from("./test_data_dir"));
+        let data_manager = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
         let chunk = DataChunk {
             id: [0u8; 32],
             dataset_id: [0u8; 32],
@@ -206,7 +213,7 @@ mod tests {
     #[test]
     fn test_delete_existing_chunk() {
         // Arrange
-        let data_manager = DataManagerImpl::new(PathBuf::from("./test_data_dir"));
+        let data_manager = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
         let chunk = DataChunk {
             id: [0u8; 32],
             dataset_id: [0u8; 32],
@@ -243,7 +250,7 @@ mod tests {
     #[test]
     fn test_delete_non_existing_chunk() {
         // Arrange
-        let data_manager = DataManagerImpl::new(PathBuf::from("./test_data_dir"));
+        let data_manager = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
         let chunk_id = [3u8; 32];
         {
             let chunk_ids = data_manager.chunk_ids.lock().unwrap();
@@ -265,7 +272,7 @@ mod tests {
     #[test]
     fn test_delete_not_ready_chunk() {
         // Arrange
-        let data_manager = DataManagerImpl::new(PathBuf::from("./test_data_dir"));
+        let data_manager = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
         let chunk = DataChunk {
             id: [1u8; 32],
             dataset_id: [0u8; 32],

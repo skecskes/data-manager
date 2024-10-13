@@ -72,6 +72,7 @@ impl LocalDataSource {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use serial_test::serial;
     use super::*;
 
     #[test]
@@ -100,6 +101,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_download_chunk() {
         // Arrange
         let ds = LocalDataSource::new(PathBuf::from("./local_data_dir"));
@@ -139,12 +141,13 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_delete_chunk() {
         // Arrange
         let ds = LocalDataSource::new(PathBuf::from("./local_data_dir"));
         let dataset_id_str = "1111111111111111111111111111111111111111111111111111111111111111";
         let dataset_id_vec = hex::decode(dataset_id_str).unwrap();
-        let mut dataset_id = [1u8; 32];
+        let mut dataset_id = [0u8; 32];
         dataset_id.copy_from_slice(&dataset_id_vec);
 
         let block_range = 95..106;
@@ -199,21 +202,23 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
 
 /// Simulate downloading the chunk taking 100ms
 fn simulate_downloading_chunk(data_dir: PathBuf, chunk: DataChunk) {
-    thread::sleep(Duration::from_millis(100));
+    thread::sleep(Duration::from_millis(20));
     if chunk.dataset_id == [17u8; 32] && chunk.block_range.start == 95 && chunk.block_range.end == 106 {
         copy_dir_all(
             Path::new("./remote_data_dir/dataset_id=1111111111111111111111111111111111111111111111111111111111111111/block_range=95_106"),
             Path::new(&format!("{}/dataset_id=1111111111111111111111111111111111111111111111111111111111111111/block_range=95_106", data_dir.display()))
         ).expect("Failed to copy directory");
     };
+    thread::sleep(Duration::from_millis(80));
 }
 
 /// Simulate deleting the chunk taking 100ms
 fn simulate_deleting_chunk(data_dir: &PathBuf, chunk_id: &ChunkId) {
-    thread::sleep(Duration::from_millis(100));
+    thread::sleep(Duration::from_millis(20));
     if chunk_id.eq(&[170, 13, 118, 225, 28, 2, 234, 149, 141, 239, 145, 9, 120, 116, 116, 137, 16, 29, 106, 129, 18, 70, 73, 152, 183, 85, 25, 49, 33, 116, 247, 65]) {
         fs::remove_dir_all(
                       Path::new(&format!("{}/dataset_id=1111111111111111111111111111111111111111111111111111111111111111/block_range=95_106", data_dir.display()))
         ).expect("Failed to remove directory");
     };
+    thread::sleep(Duration::from_millis(80));
 }

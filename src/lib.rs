@@ -1,6 +1,4 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 use std::thread;
 use crate::data_catalogue::DataCatalogue;
 use crate::data_chunk::{ChunkId, DataChunk, DataChunkRef, DatasetId};
@@ -21,11 +19,11 @@ pub enum ChunkStatus {
     Downloading,
     Ready,
     Deleting,
+    Deleted,
 }
 
 pub struct DataManagerImpl {
     pub data_source: LocalDataSource,
-    pub chunk_ids: Arc<Mutex<HashMap<ChunkId, ChunkStatus>>>,
     pub tasks_manager: TasksManager,
     pub data_catalogue: DataCatalogue,
 }
@@ -33,92 +31,61 @@ pub struct DataManagerImpl {
 impl DataManager for DataManagerImpl {
     fn new(data_dir: PathBuf) -> Self {
         let data_source = LocalDataSource::new(data_dir);
-        let local_data_chunks = data_source.read_local_chunks();
-                
-        // todo: read the chunks from the data_dir 
+        let local_chunk_ids = data_source.read_local_chunks();
+
         DataManagerImpl {
-            chunk_ids: Arc::new(Mutex::new(HashMap::new())),
             data_source,
             tasks_manager: TasksManager::default(),
-            data_catalogue: DataCatalogue::new(Vec::new()),
+            data_catalogue: DataCatalogue::new(local_chunk_ids),
         }
     }
 
     /// Schedule `chunk` download in background
     fn download_chunk(&self, chunk: DataChunk) {
         let task_waker = self.tasks_manager.add_future_to_manager_pool();
-        let data_dir = self.data_source.data_dir.clone();
-        let chunk_ids: Arc<Mutex<HashMap<ChunkId, ChunkStatus>>> = Arc::clone(&self.chunk_ids);
-        {
-            let mut chunk_ids = chunk_ids.lock().unwrap();
-            if chunk_ids.contains_key(&chunk.id) {
-                // don't download the chunk if it's already being processed
-                return;
-            }
-            chunk_ids.insert(chunk.id, ChunkStatus::Downloading);
+        if !self.data_catalogue.start_download(&chunk) {
+            // don't try to download the chunk if it's already being processed
+            return;
         }
-        let worker_thread = thread::spawn(move || {
-            let result = LocalDataSource::download_chunk(data_dir, chunk.clone());
-            TasksManager::wake_the_future(task_waker);
 
-            let mut chunk_ids = chunk_ids.lock().unwrap();
-            chunk_ids.insert(chunk.id, ChunkStatus::Ready);
+        thread::spawn(move || {
+            let result = LocalDataSource::download_chunk(self.data_source.data_dir.clone(), chunk.clone());
+            TasksManager::wake_the_future(task_waker);
+            self.data_catalogue.update_chunk(&chunk, &ChunkStatus::Ready);
             result
         });
-
-        // if we would need to do something with result, we could join the worker handle,
-        // but that would be blocking. Rather, we could use a channel to communicate the result.
-        // let result = worker_thread.join().expect("Failed to join worker thread");
-        // println!("Result: {:?}", result);
     }
 
+    /// List chunks, that are currently available
     fn list_chunks(&self) -> Vec<ChunkId> {
-        self.chunk_ids.lock().unwrap()
-            .iter()
-            .filter_map(|(chunk_id, status)| {
-                if status == &ChunkStatus::Ready {
-                    Some(*chunk_id)
-                } else {
-                    None
-                }
-            }
-        ).collect()
+        self.data_catalogue.get_ready_chunk_ids()
     }
 
     fn find_chunk(&self, dataset_id: DatasetId, block_number: u64) -> Option<impl DataChunkRef> {
-        // TODO: unimplemented!()
-        Some(DataChunk {
-            id: [0u8; 32],
-            dataset_id: [0u8; 32],
-            block_range: 0..0,
-            files: Default::default(),
-        })
+        self.data_catalogue.get_chunk_by_dataset_and_block(&dataset_id, block_number)
     }
 
     fn delete_chunk(&self, chunk_id: ChunkId) {
         let task_waker = self.tasks_manager.add_future_to_manager_pool();
-        let data_dir = self.data_source.data_dir.clone();
-        let chunk_ids: Arc<Mutex<HashMap<ChunkId, ChunkStatus>>> = Arc::clone(&self.chunk_ids);
-        {
-            let mut chunk_ids = chunk_ids.lock().unwrap();
-            if (
-                chunk_ids.contains_key(&chunk_id)
-                    && chunk_ids.get(&chunk_id) != Some(&ChunkStatus::Ready)
-            ) ||
-                chunk_ids.get(&chunk_id).is_none() {
-                // don't delete the chunk if it's not ready to be deleted, or it doesn't exist
+        let chunk = self.data_catalogue.get_chunk_by_id(&chunk_id);
+        match chunk {
+            Some(chunk) => {
+                if !self.data_catalogue.start_deletion(chunk) {
+                    // don't try to delete the chunk if it's not ready
+                    return;
+                }
+                thread::spawn(move || {
+                    let result = LocalDataSource::delete_chunk(self.data_source.data_dir.clone(), chunk_id);
+                    TasksManager::wake_the_future(task_waker);
+
+                    self.data_catalogue.update_chunk(&chunk, &ChunkStatus::Deleted);
+                    result
+                });
+            },
+            None => {
                 return;
             }
-            chunk_ids.insert(chunk_id, ChunkStatus::Deleting);
         }
-        thread::spawn(move || {
-            let result = LocalDataSource::delete_chunk(data_dir, chunk_id);
-            TasksManager::wake_the_future(task_waker);
-
-            let mut chunk_ids = chunk_ids.lock().unwrap();
-            chunk_ids.remove(&chunk_id);
-            result
-        });
     }
 }
 
@@ -129,16 +96,16 @@ mod tests {
 
     #[test]
     fn test_instantiate_data_manager() {
-        let dm = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
-        let chunk_ids = dm.chunk_ids.lock().unwrap();
+        let data_manager = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
+        let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
         assert_eq!(chunk_ids.len(), 4);
         assert!(chunk_ids.contains_key(&[0u8; 32]));
     }
 
     #[test]
     fn test_list_chunks() {
-        let dm = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
-        let chunk_ids = dm.list_chunks();
+        let data_manager = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
+        let chunk_ids = data_manager.list_chunks();
         assert_eq!(chunk_ids.len(), 4);
     }
 
@@ -154,7 +121,7 @@ mod tests {
             files: Default::default()
         };
         {
-            let chunk_ids = data_manager.chunk_ids.lock().unwrap();
+            let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
             assert_eq!(chunk_ids.len(), 4);
         }
 
@@ -163,7 +130,7 @@ mod tests {
 
         // Assert
         {
-            let chunk_ids = data_manager.chunk_ids.lock().unwrap();
+            let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
             assert!(chunk_ids.contains_key(&[5u8; 32]));
             assert_eq!(chunk_ids.get(&[5u8; 32]), Some(&ChunkStatus::Downloading));
         }
@@ -174,7 +141,7 @@ mod tests {
 
         // Assert
         // check if the chunk was added to the list of chunks
-        let chunk_ids = data_manager.chunk_ids.lock().unwrap();
+        let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
         assert_eq!(chunk_ids.len(), 5);
         assert!(chunk_ids.contains_key(&[5u8; 32]));
         assert_eq!(chunk_ids.get(&[5u8; 32]), Some(&ChunkStatus::Ready));
@@ -195,7 +162,7 @@ mod tests {
             files: Default::default()
         };
         {
-            let chunk_ids = data_manager.chunk_ids.lock().unwrap();
+            let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
             assert_eq!(chunk_ids.len(), 4);
         }
 
@@ -206,7 +173,7 @@ mod tests {
         });
 
         // Assert
-        let chunk_ids = data_manager.chunk_ids.lock().unwrap();
+        let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
         assert_eq!(chunk_ids.len(), 4);
     }
 
@@ -221,7 +188,7 @@ mod tests {
             files: Default::default()
         };
         {
-            let chunk_ids = data_manager.chunk_ids.lock().unwrap();
+            let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
             assert_eq!(chunk_ids.len(), 4);
         }
 
@@ -230,14 +197,14 @@ mod tests {
 
         // Assert
         {
-            let chunk_ids = data_manager.chunk_ids.lock().unwrap();
+            let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
             assert_eq!(chunk_ids.len(), 4);
             assert_eq!(chunk_ids.get(&[0u8; 32]), Some(&ChunkStatus::Deleting));
         }
         futures::executor::block_on(async {
             thread::sleep(std::time::Duration::from_millis(300));
         });
-        let chunk_ids = data_manager.chunk_ids.lock().unwrap();
+        let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
         assert_eq!(chunk_ids.len(), 3);
         assert_eq!(chunk_ids.get(&[0u8; 32]), None);
 
@@ -253,7 +220,7 @@ mod tests {
         let data_manager = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
         let chunk_id = [3u8; 32];
         {
-            let chunk_ids = data_manager.chunk_ids.lock().unwrap();
+            let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
             assert_eq!(chunk_ids.len(), 4);
             assert!(!chunk_ids.contains_key(&[3u8; 32]));
         }
@@ -263,7 +230,7 @@ mod tests {
 
         // Assert
         {
-            let chunk_ids = data_manager.chunk_ids.lock().unwrap();
+            let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
             assert_eq!(chunk_ids.len(), 4);
             assert!(!chunk_ids.contains_key(&[3u8; 32]));
         }
@@ -280,7 +247,7 @@ mod tests {
             files: Default::default()
         };
         {
-            let chunk_ids = data_manager.chunk_ids.lock().unwrap();
+            let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
             assert_eq!(chunk_ids.len(), 4);
         }
 
@@ -293,14 +260,14 @@ mod tests {
 
         // Assert
         {
-            let chunk_ids = data_manager.chunk_ids.lock().unwrap();
+            let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
             assert_eq!(chunk_ids.len(), 5);
             assert_eq!(chunk_ids.get(&[1u8; 32]), Some(&ChunkStatus::Downloading));
         }
         futures::executor::block_on(async {
             thread::sleep(std::time::Duration::from_millis(300));
         });
-        let chunk_ids = data_manager.chunk_ids.lock().unwrap();
+        let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
         assert_eq!(chunk_ids.len(), 5);
         assert_eq!(chunk_ids.get(&[1u8; 32]), Some(&ChunkStatus::Ready));
 

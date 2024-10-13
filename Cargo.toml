@@ -8,3 +8,6 @@ futures = { version = "0.3.31", features = ["thread-pool"] }
 hex = "0.4.3"
 polars = "0.43.1"
 sha256 = "1.5.0"
+
+[dev-dependencies]
+serial_test = "0.5"

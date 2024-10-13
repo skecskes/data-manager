@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use crate::data_catalogue::DataCatalogue;
 use crate::data_chunk::{ChunkId, DataChunk, DatasetId};
 use crate::data_manager::DataManager;
 use crate::event_loop::TasksManager;
@@ -12,6 +13,7 @@ mod data_manager;
 mod local_data_source;
 mod io_operation;
 mod event_loop;
+mod data_catalogue;
 
 #[derive(Debug, Clone)]
 #[derive(PartialEq)]
@@ -25,15 +27,19 @@ pub struct DataManagerImpl {
     pub data_source: LocalDataSource,
     pub chunk_ids: Arc<Mutex<HashMap<ChunkId, ChunkStatus>>>,
     pub tasks_manager: TasksManager,
+    pub data_catalogue: DataCatalogue,
 }
 
 impl DataManager for DataManagerImpl {
     fn new(data_dir: PathBuf) -> Self {
         let data_source = LocalDataSource::new(data_dir);
+        let local_data_chunks = data_source.read_local_chunks();
+        let chunk_ids = local_data_chunks.iter().map(|chunk| (chunk.id, ChunkStatus::Ready)).collect();
         DataManagerImpl {
-            chunk_ids: Arc::new(Mutex::new(data_source.list_existing_chunk_ids())),
+            chunk_ids: Arc::new(Mutex::new(chunk_ids)),
             data_source,
             tasks_manager: TasksManager::default(),
+            data_catalogue: DataCatalogue::new(local_data_chunks),
         }
     }
 
@@ -78,7 +84,7 @@ impl DataManager for DataManagerImpl {
         ).collect()
     }
 
-    fn find_chunk(&self, dataset_id: DatasetId, block_number: u64) -> Option<DataChunk> {
+    fn find_chunk(&self, dataset_id: DatasetId, block_number: u64) -> Option<impl DataChunkRef> {
         unimplemented!()
     }
 
@@ -89,7 +95,7 @@ impl DataManager for DataManagerImpl {
         {
             let mut chunk_ids = chunk_ids.lock().unwrap();
             if (
-                chunk_ids.contains_key(&chunk_id) 
+                chunk_ids.contains_key(&chunk_id)
                     && chunk_ids.get(&chunk_id) != Some(&ChunkStatus::Ready)
             ) ||
                 chunk_ids.get(&chunk_id).is_none() {
@@ -255,9 +261,9 @@ mod tests {
             assert!(!chunk_ids.contains_key(&[3u8; 32]));
         }
     }
-    
+
     #[test]
-    fn test_delete_not_ready_chunk() { 
+    fn test_delete_not_ready_chunk() {
         // Arrange
         let data_manager = DataManagerImpl::new(PathBuf::from("./test_data_dir"));
         let chunk = DataChunk {

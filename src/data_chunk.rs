@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::ops::Range;
+use std::path::Path;
 
 pub type DatasetId = [u8; 32];
 pub type ChunkId = [u8; 32];
@@ -18,4 +19,17 @@ pub struct DataChunk {
     /// Usually contains 1 - 10 files of various sizes.
     /// The total size of all files in the chunk is about 200 MB.
     pub files: HashMap<String, String>
+}
+
+// Data chunk must remain available and untouched till this reference is not dropped
+pub trait DataChunkRef: Send + Sync + Clone {
+    // Data chunk directory
+    fn path(&self) -> &Path;
+}
+
+impl DataChunkRef for DataChunk {
+    fn path(&self) -> &Path {
+        // TODO: this is wrong, but we will fix it later. It should be a path to the directory
+        &self.files.iter().take(1).next().unwrap().0.as_ref()
+    }
 }

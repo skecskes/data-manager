@@ -2,7 +2,6 @@ use crate::data_chunk::{ChunkId, DataChunk};
 use std::path::PathBuf;
 use std::time::Duration;
 use std::{fs, thread};
-use std::collections::HashMap;
 use crate::ChunkStatus;
 
 #[derive(Clone)]
@@ -14,10 +13,10 @@ impl LocalDataSource {
     pub fn new(data_dir: PathBuf) -> Self {
         LocalDataSource { data_dir }
     }
-
-    pub fn list_existing_chunk_ids(&self) -> HashMap<ChunkId, ChunkStatus> {
-        let mut chunk_ids = HashMap::new();
-
+    
+    pub fn read_local_chunks(&self) -> Vec<DataChunk> {
+        let mut chunks = Vec::new();
+        // TODO: fix the to read new folder structure
         if let Ok(entries) = fs::read_dir(&self.data_dir) {
             for entry in entries.flatten() {
                 if let Ok(file_name) = entry.file_name().into_string() {
@@ -26,15 +25,21 @@ impl LocalDataSource {
                             if chunk_id.len() == 32 {
                                 let mut chunk_id_array = [0u8; 32];
                                 chunk_id_array.copy_from_slice(&chunk_id);
-                                chunk_ids.insert(chunk_id_array, ChunkStatus::Ready);
+                                let chunk = DataChunk {
+                                    id: chunk_id_array,
+                                    dataset_id: [0u8; 32],
+                                    block_range: 0..0,
+                                    files: Default::default(),
+                                };
+                                chunks.push(chunk);
                             }
                         }
                     }
                 }
             }
         }
-
-        chunk_ids
+        
+        chunks
     }
 
     /// Download the all the chunks to the data_dir as one chunk_id file

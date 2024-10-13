@@ -53,7 +53,6 @@ impl LocalDataSource {
 
     /// Download the all the chunks to the data_dir as one chunk_id file
     pub fn download_chunk(data_dir: PathBuf, chunk: DataChunk) -> String {
-
         simulate_downloading_chunk(data_dir.clone(), chunk.clone());
         format!(
             "Downloading the chunk {:?} to {} has completed",
@@ -64,11 +63,9 @@ impl LocalDataSource {
     
     pub fn delete_chunk(data_dir: PathBuf, chunk_id: ChunkId) -> String {
         // Simulate deleting the chunk by waiting for 100ms
-        thread::sleep(Duration::from_millis(100));
-        let chunk_id = hex::encode(chunk_id);
-        let file_path = data_dir.join(&chunk_id);
-        fs::remove_file(file_path).expect("Failed to remove file");
-        format!("Deleting the chunk {} from {} has completed", chunk_id, data_dir.display())
+        simulate_deleting_chunk(&data_dir, &chunk_id);
+
+        format!("Deleting the chunk {:?} from {} has completed", chunk_id, data_dir.display())
     }
 }
 
@@ -140,6 +137,46 @@ mod tests {
 
         simulate_deleting_chunk(&ds.data_dir.clone(), &chunk.id);
     }
+
+    #[test]
+    fn test_delete_chunk() {
+        // Arrange
+        let ds = LocalDataSource::new(PathBuf::from("./local_data_dir"));
+        let dataset_id_str = "1111111111111111111111111111111111111111111111111111111111111111";
+        let dataset_id_vec = hex::decode(dataset_id_str).unwrap();
+        let mut dataset_id = [1u8; 32];
+        dataset_id.copy_from_slice(&dataset_id_vec);
+
+        let block_range = 95..106;
+        let chunk_id = DataCatalogue::get_chunk_id_from_dataset_and_block_range(&dataset_id, &block_range);
+        let chunk = DataChunk {
+            id: chunk_id,
+            dataset_id: dataset_id,
+            block_range: block_range,
+            files: HashMap::from([
+                ("part-1.parquet".to_string(), "https://example.com/par-1.parquet".to_string()),
+                ("part-2.parquet".to_string(), "https://example.com/par-2.parquet".to_string()),
+                ("part-3.parquet".to_string(), "https://example.com/par-3.parquet".to_string()),
+            ]),
+        };
+        simulate_downloading_chunk(ds.data_dir.clone(), chunk.clone());
+        let chunk_ids = ds.read_local_chunks();
+        assert_eq!(chunk_ids.len(), 9);
+        assert!(chunk_ids.contains(&chunk.id));
+
+        // Act
+        let result = LocalDataSource::delete_chunk(ds.data_dir.clone(), chunk.id);
+
+        // Assert
+        assert_eq!(
+            result,
+            "Deleting the chunk [170, 13, 118, 225, 28, 2, 234, 149, 141, 239, 145, 9, 120, 116, 116, 137, 16, 29, 106, 129, 18, 70, 73, 152, 183, 85, 25, 49, 33, 116, 247, 65] from ./local_data_dir has completed"
+        );
+
+        let chunk_ids = ds.read_local_chunks();
+        assert_eq!(chunk_ids.len(), 8);
+        assert!(!chunk_ids.contains(&chunk.id));
+    }
 }
 
 fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
@@ -163,7 +200,7 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
 /// Simulate downloading the chunk taking 100ms
 fn simulate_downloading_chunk(data_dir: PathBuf, chunk: DataChunk) {
     thread::sleep(Duration::from_millis(100));
-    if chunk.dataset_id == [1u8; 32] && chunk.block_range.start == 95 && chunk.block_range.end == 106 {
+    if chunk.dataset_id == [17u8; 32] && chunk.block_range.start == 95 && chunk.block_range.end == 106 {
         copy_dir_all(
             Path::new("./remote_data_dir/dataset_id=1111111111111111111111111111111111111111111111111111111111111111/block_range=95_106"),
             Path::new(&format!("{}/dataset_id=1111111111111111111111111111111111111111111111111111111111111111/block_range=95_106", data_dir.display()))
@@ -171,6 +208,7 @@ fn simulate_downloading_chunk(data_dir: PathBuf, chunk: DataChunk) {
     };
 }
 
+/// Simulate deleting the chunk taking 100ms
 fn simulate_deleting_chunk(data_dir: &PathBuf, chunk_id: &ChunkId) {
     thread::sleep(Duration::from_millis(100));
     if chunk_id.eq(&[170, 13, 118, 225, 28, 2, 234, 149, 141, 239, 145, 9, 120, 116, 116, 137, 16, 29, 106, 129, 18, 70, 73, 152, 183, 85, 25, 49, 33, 116, 247, 65]) {

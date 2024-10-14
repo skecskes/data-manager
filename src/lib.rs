@@ -48,12 +48,15 @@ impl DataManager for DataManagerImpl {
             return;
         }
 
+        let data_dir = self.data_source.data_dir.clone();
+        let data_catalogue = self.data_catalogue.clone();
         thread::spawn(move || {
-            let result = LocalDataSource::download_chunk(self.data_source.data_dir.clone(), chunk.clone());
-            TasksManager::wake_the_future(task_waker);
-            self.data_catalogue.update_chunk(&chunk, &ChunkStatus::Ready);
-            result
-        });
+                let result = LocalDataSource::download_chunk(data_dir, chunk.clone());
+                TasksManager::wake_the_future(task_waker);
+                data_catalogue.update_chunk(&chunk, &ChunkStatus::Ready);
+                result
+            }
+        );
     }
 
     /// List chunks, that are currently available
@@ -70,16 +73,24 @@ impl DataManager for DataManagerImpl {
         let chunk = self.data_catalogue.get_chunk_by_id(&chunk_id);
         match chunk {
             Some(chunk) => {
-                if !self.data_catalogue.start_deletion(chunk) {
+                if !self.data_catalogue.start_deletion(&chunk) {
                     // don't try to delete the chunk if it's not ready
                     return;
                 }
-                thread::spawn(move || {
-                    let result = LocalDataSource::delete_chunk(self.data_source.data_dir.clone(), chunk_id);
-                    TasksManager::wake_the_future(task_waker);
+                thread::spawn({
+                    let data_dir = self.data_source.data_dir.clone();
+                    let chunk = chunk.clone();
+                    let task_waker = task_waker.clone();
+                    let data_catalogue = self.data_catalogue.clone();
 
-                    self.data_catalogue.update_chunk(&chunk, &ChunkStatus::Deleted);
-                    result
+                    move || {
+                        let result = LocalDataSource::delete_chunk(data_dir, chunk_id);
+                        TasksManager::wake_the_future(task_waker);
+
+                        data_catalogue.update_chunk(&chunk, &ChunkStatus::Deleted);
+                        result
+                    }
+
                 });
             },
             None => {
@@ -91,137 +102,150 @@ impl DataManager for DataManagerImpl {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use serial_test::serial;
+    use crate::local_data_source::{get_test_chunk_111111_0_35, get_test_chunk_111111_107_135, get_test_chunk_111111_36_94, get_test_chunk_111111_95_106};
     use super::*;
 
     #[test]
+    #[serial]
     fn test_instantiate_data_manager() {
         let data_manager = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
         let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
-        assert_eq!(chunk_ids.len(), 4);
-        assert!(chunk_ids.contains_key(&[0u8; 32]));
+        assert_eq!(chunk_ids.len(), 8);
+        assert!(chunk_ids.contains_key(&[147, 161, 202, 94, 141, 129, 235, 161, 211, 123, 214, 159, 212, 119, 7, 59, 107, 144, 48, 224, 108, 245, 142, 139, 2, 173, 240, 231, 54, 58, 115, 159]));
+        assert!(chunk_ids.contains_key(&[52, 249, 87, 41, 193, 143, 108, 194, 169, 137, 151, 250, 99, 44, 49, 211, 165, 208, 160, 65, 58, 31, 238, 223, 208, 29, 143, 142, 93, 6, 220, 211]));
+        assert!(chunk_ids.contains_key(&[193, 57, 118, 234, 133, 186, 129, 98, 68, 9, 137, 174, 130, 138, 250, 203, 200, 19, 226, 101, 224, 108, 235, 80, 186, 6, 49, 14, 23, 58, 108, 70]));
+        assert!(chunk_ids.contains_key(&[118, 166, 206, 104, 188, 72, 255, 213, 176, 59, 193, 246, 55, 235, 118, 138, 87, 148, 244, 77, 58, 207, 103, 229, 97, 58, 212, 176, 79, 143, 187, 4]));
+        assert!(chunk_ids.contains_key(&[98, 39, 185, 12, 229, 13, 3, 121, 220, 39, 48, 2, 38, 129, 54, 147, 17, 92, 89, 191, 47, 125, 227, 35, 162, 83, 99, 140, 124, 47, 92, 153]));
+        assert!(chunk_ids.contains_key(&[47, 214, 124, 127, 237, 100, 240, 96, 40, 147, 96, 68, 104, 154, 218, 127, 165, 181, 128, 44, 47, 16, 60, 172, 24, 208, 88, 136, 149, 79, 243, 191]));
+        assert!(chunk_ids.contains_key(&[56, 24, 248, 27, 82, 241, 162, 191, 1, 219, 253, 77, 160, 250, 121, 88, 143, 116, 109, 77, 123, 216, 197, 83, 201, 51, 240, 120, 186, 231, 249, 76]));
+        assert!(chunk_ids.contains_key(&[168, 77, 161, 67, 100, 46, 30, 66, 3, 236, 122, 88, 18, 185, 131, 120, 153, 130, 152, 113, 236, 29, 91, 3, 244, 6, 254, 177, 61, 66, 182, 178]));
+
     }
 
     #[test]
+    #[serial]
     fn test_list_chunks() {
         let data_manager = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
         let chunk_ids = data_manager.list_chunks();
-        assert_eq!(chunk_ids.len(), 4);
+        assert_eq!(chunk_ids.len(), 8);
     }
 
     #[test]
+    #[serial]
     fn test_download_new_chunk() {
-
         // Arrange
         let data_manager = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
-        let chunk = DataChunk {
-            id: [5u8; 32],
-            dataset_id: [0u8; 32],
-            block_range: 0..0,
-            files: Default::default()
-        };
+        let chunk = get_test_chunk_111111_95_106();
+
+        // Assert initial state
         {
             let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
-            assert_eq!(chunk_ids.len(), 4);
+            assert_eq!(chunk_ids.len(), 8);
+            assert!(!chunk_ids.contains_key(&chunk.id));
         }
 
         // Act
         data_manager.download_chunk(chunk.clone());
 
-        // Assert
+        // Assert transitional state
+        futures::executor::block_on(async {
+            thread::sleep(std::time::Duration::from_millis(15));
+        });
         {
             let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
-            assert!(chunk_ids.contains_key(&[5u8; 32]));
-            assert_eq!(chunk_ids.get(&[5u8; 32]), Some(&ChunkStatus::Downloading));
+            assert_eq!(chunk_ids.len(), 9);
+            assert_eq!(chunk_ids.get(&chunk.id), Some(&ChunkStatus::Downloading));
         }
-        // wait for the download to complete before asserting anything
+
+        // Asserting final state
         futures::executor::block_on(async {
-            thread::sleep(std::time::Duration::from_millis(300));
+            thread::sleep(std::time::Duration::from_millis(200));
         });
-
-        // Assert
-        // check if the chunk was added to the list of chunks
-        let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
-        assert_eq!(chunk_ids.len(), 5);
-        assert!(chunk_ids.contains_key(&[5u8; 32]));
-        assert_eq!(chunk_ids.get(&[5u8; 32]), Some(&ChunkStatus::Ready));
-
-        let chunk_id = hex::encode(chunk.id);
-        let file_path = data_manager.data_source.data_dir.join(&chunk_id);
-        fs::remove_file(file_path).expect("Failed to remove file");
+        {
+            let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
+            // chunk was added to the list of chunks and is in `Ready` state
+            assert_eq!(chunk_ids.len(), 9);
+            assert!(chunk_ids.contains_key(&chunk.id));
+            assert_eq!(chunk_ids.get(&chunk.id), Some(&ChunkStatus::Ready));
+        }
+        // cleanup
+        data_manager.delete_chunk(chunk.id);
+        futures::executor::block_on(async {
+            thread::sleep(std::time::Duration::from_millis(50));
+        });
     }
 
     #[test]
+    #[serial]
     fn test_download_existing_chunk() {
         // Arrange
         let data_manager = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
-        let chunk = DataChunk {
-            id: [0u8; 32],
-            dataset_id: [0u8; 32],
-            block_range: 0..0,
-            files: Default::default()
-        };
+        let chunk = get_test_chunk_111111_0_35();
         {
             let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
-            assert_eq!(chunk_ids.len(), 4);
+            assert_eq!(chunk_ids.len(), 8);
         }
 
         // Act
         data_manager.download_chunk(chunk.clone());
         futures::executor::block_on(async {
-            thread::sleep(std::time::Duration::from_millis(300));
+            thread::sleep(std::time::Duration::from_millis(200));
         });
 
         // Assert
         let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
-        assert_eq!(chunk_ids.len(), 4);
+        assert_eq!(chunk_ids.len(), 8);
     }
 
     #[test]
+    #[serial]
     fn test_delete_existing_chunk() {
         // Arrange
-        let data_manager = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
-        let chunk = DataChunk {
-            id: [0u8; 32],
-            dataset_id: [0u8; 32],
-            block_range: 0..0,
-            files: Default::default()
-        };
+        let data_dir = PathBuf::from("./local_data_dir");
+        let data_manager = DataManagerImpl::new(data_dir);
+        let chunk = get_test_chunk_111111_107_135();
         {
             let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
-            assert_eq!(chunk_ids.len(), 4);
+            assert_eq!(chunk_ids.len(), 8);
         }
+        data_manager.download_chunk(chunk.clone());
+        {
+            let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
+            assert_eq!(chunk_ids.len(), 9);
+        }
+        futures::executor::block_on(async {
+            thread::sleep(std::time::Duration::from_millis(200));
+        });
 
         // Act
         data_manager.delete_chunk(chunk.id);
 
-        // Assert
+        // Assert deleting
         {
             let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
-            assert_eq!(chunk_ids.len(), 4);
-            assert_eq!(chunk_ids.get(&[0u8; 32]), Some(&ChunkStatus::Deleting));
+            assert_eq!(chunk_ids.len(), 9);
+            assert_eq!(chunk_ids.get(&chunk.id), Some(&ChunkStatus::Deleting));
         }
         futures::executor::block_on(async {
-            thread::sleep(std::time::Duration::from_millis(300));
+            thread::sleep(std::time::Duration::from_millis(200));
         });
-        let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
-        assert_eq!(chunk_ids.len(), 3);
-        assert_eq!(chunk_ids.get(&[0u8; 32]), None);
 
-        // put back the deleted chunk for next tests
-        let chunk_id = hex::encode(chunk.id);
-        let file_path = data_manager.data_source.data_dir.join(&chunk_id);
-        fs::write(file_path, b"").expect("Failed to write file");
+        // Assert deleted
+        let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
+        assert_eq!(chunk_ids.len(), 8);
+        assert_eq!(chunk_ids.get(&chunk.id), None);
     }
 
     #[test]
+    #[serial]
     fn test_delete_non_existing_chunk() {
         // Arrange
         let data_manager = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
         let chunk_id = [3u8; 32];
         {
             let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
-            assert_eq!(chunk_ids.len(), 4);
+            assert_eq!(chunk_ids.len(), 8);
             assert!(!chunk_ids.contains_key(&[3u8; 32]));
         }
 
@@ -231,50 +255,35 @@ mod tests {
         // Assert
         {
             let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
-            assert_eq!(chunk_ids.len(), 4);
+            assert_eq!(chunk_ids.len(), 8);
             assert!(!chunk_ids.contains_key(&[3u8; 32]));
         }
     }
 
     #[test]
+    #[serial]
     fn test_delete_not_ready_chunk() {
         // Arrange
         let data_manager = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
-        let chunk = DataChunk {
-            id: [1u8; 32],
-            dataset_id: [0u8; 32],
-            block_range: 0..0,
-            files: Default::default()
-        };
+        let chunk = get_test_chunk_111111_0_35();
         {
             let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
-            assert_eq!(chunk_ids.len(), 4);
+            assert_eq!(chunk_ids.len(), 8);
+
         }
+        // chunk that is in downloading or deleting state can't be deleted again.
+        data_manager.data_catalogue.update_chunk(&chunk, &ChunkStatus::Deleting);
+
 
         // Act
-        data_manager.download_chunk(chunk.clone());
-        futures::executor::block_on(async {
-            thread::sleep(std::time::Duration::from_millis(50));
-        });
         data_manager.delete_chunk(chunk.id);
 
         // Assert
         {
             let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
-            assert_eq!(chunk_ids.len(), 5);
-            assert_eq!(chunk_ids.get(&[1u8; 32]), Some(&ChunkStatus::Downloading));
+            assert_eq!(chunk_ids.len(), 8);
+            assert_eq!(chunk_ids.get(&chunk.id), Some(&ChunkStatus::Deleting));
         }
-        futures::executor::block_on(async {
-            thread::sleep(std::time::Duration::from_millis(300));
-        });
-        let chunk_ids = data_manager.data_catalogue.chunk_ids.lock().unwrap();
-        assert_eq!(chunk_ids.len(), 5);
-        assert_eq!(chunk_ids.get(&[1u8; 32]), Some(&ChunkStatus::Ready));
-
-        // Clean up
-        let chunk_id = hex::encode(chunk.id);
-        let file_path = data_manager.data_source.data_dir.join(&chunk_id);
-        fs::remove_file(file_path).expect("Failed to remove file");
     }
 }
 

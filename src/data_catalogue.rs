@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use crate::ChunkStatus;
 use crate::data_chunk::{ChunkId, DataChunk, DatasetId};
 
+#[derive(Clone)]
 pub struct DataCatalogue {
     pub chunk_ids: Arc<Mutex<HashMap<ChunkId, ChunkStatus>>>,
     chunks_by_id: Arc<Mutex<HashMap<ChunkId, DataChunk>>>,
@@ -108,8 +109,8 @@ impl DataCatalogue {
         }
     }
 
-    pub fn get_chunk_by_id(&self, chunk_id: &ChunkId) -> Option<&DataChunk> {
-        self.chunks_by_id.lock().unwrap().get(chunk_id)
+    pub fn get_chunk_by_id(&self, chunk_id: &ChunkId) -> Option<DataChunk> {
+        self.chunks_by_id.lock().unwrap().get(chunk_id).cloned()
     }
 
     pub fn get_chunk_by_dataset_and_block(&self, dataset_id: &DatasetId, block_number: u64) -> Option<DataChunk> {
@@ -133,6 +134,6 @@ mod tests {
         let block_range = 0..100;
         let chunk_id = super::DataCatalogue::get_chunk_id_from_dataset_and_block_range(&dataset_id, &block_range);
         assert_eq!(chunk_id.len(), 32);
-        assert_eq!(chunk_id, [0u8; 32]);
+        assert_eq!(chunk_id, [136, 104, 208, 73, 150, 126, 253, 47, 9, 128, 63, 93, 28, 177, 175, 129, 70, 243, 137, 65, 94, 32, 62, 196, 150, 239, 161, 94, 122, 237, 101, 81]);
     }
 }

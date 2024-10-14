@@ -2,6 +2,7 @@ use crate::data_chunk::{ChunkId, DataChunk};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::{fs, thread};
+use std::collections::HashMap;
 use crate::data_catalogue::DataCatalogue;
 
 #[derive(Clone)]
@@ -51,20 +52,21 @@ impl LocalDataSource {
         chunks
     }
 
-    /// Download the all the chunks to the data_dir as one chunk_id file
+    /// Download the all the chunks to the local_data_dir
     pub fn download_chunk(data_dir: PathBuf, chunk: DataChunk) -> String {
         simulate_downloading_chunk(data_dir.clone(), chunk.clone());
+       // @todo: Implement the actual deletion of the chunk
         format!(
             "Downloading the chunk {:?} to {} has completed",
             chunk.id,
             data_dir.display()
         )
     }
-    
-    pub fn delete_chunk(data_dir: PathBuf, chunk_id: ChunkId) -> String {
-        // Simulate deleting the chunk by waiting for 100ms
-        simulate_deleting_chunk(&data_dir, &chunk_id);
 
+    /// Simulate deleting the chunk by waiting for 100ms
+    pub fn delete_chunk(data_dir: PathBuf, chunk_id: ChunkId) -> String {
+        simulate_deleting_chunk(&data_dir, &chunk_id);
+        // @todo: Implement the actual deletion of the chunk
         format!("Deleting the chunk {:?} from {} has completed", chunk_id, data_dir.display())
     }
 }
@@ -97,7 +99,6 @@ mod tests {
         assert_eq!(chunk_ids[5], [47, 214, 124, 127, 237, 100, 240, 96, 40, 147, 96, 68, 104, 154, 218, 127, 165, 181, 128, 44, 47, 16, 60, 172, 24, 208, 88, 136, 149, 79, 243, 191]);
         assert_eq!(chunk_ids[6], [56, 24, 248, 27, 82, 241, 162, 191, 1, 219, 253, 77, 160, 250, 121, 88, 143, 116, 109, 77, 123, 216, 197, 83, 201, 51, 240, 120, 186, 231, 249, 76]);
         assert_eq!(chunk_ids[7], [168, 77, 161, 67, 100, 46, 30, 66, 3, 236, 122, 88, 18, 185, 131, 120, 153, 130, 152, 113, 236, 29, 91, 3, 244, 6, 254, 177, 61, 66, 182, 178]);
-
     }
 
     #[test]
@@ -221,4 +222,86 @@ fn simulate_deleting_chunk(data_dir: &PathBuf, chunk_id: &ChunkId) {
         ).expect("Failed to remove directory");
     };
     thread::sleep(Duration::from_millis(80));
+}
+
+pub(crate) fn get_test_chunk_111111_0_35() -> DataChunk {
+    let dataset_id_str = "1111111111111111111111111111111111111111111111111111111111111111";
+    let dataset_id_vec = hex::decode(dataset_id_str).unwrap();
+    let mut dataset_id = [0u8; 32];
+    dataset_id.copy_from_slice(&dataset_id_vec);
+    let block_range = 0..35;
+    let chunk_id = DataCatalogue::get_chunk_id_from_dataset_and_block_range(&dataset_id, &block_range);
+    let chunk = DataChunk {
+        id: chunk_id,
+        dataset_id: dataset_id,
+        block_range: block_range,
+        files: HashMap::from([
+            ("part-1.parquet".to_string(), "https://example.com/part-1.parquet".to_string()),
+            ("part-2.parquet".to_string(), "https://example.com/part-2.parquet".to_string()),
+            ("part-3.parquet".to_string(), "https://example.com/part-3.parquet".to_string()),
+        ]),
+    };
+    chunk
+}
+
+pub(crate) fn get_test_chunk_111111_36_94() -> DataChunk {
+    let dataset_id_str = "1111111111111111111111111111111111111111111111111111111111111111";
+    let dataset_id_vec = hex::decode(dataset_id_str).unwrap();
+    let mut dataset_id = [0u8; 32];
+    dataset_id.copy_from_slice(&dataset_id_vec);
+    let block_range = 36..94;
+    let chunk_id = DataCatalogue::get_chunk_id_from_dataset_and_block_range(&dataset_id, &block_range);
+    let chunk = DataChunk {
+        id: chunk_id,
+        dataset_id: dataset_id,
+        block_range: block_range,
+        files: HashMap::from([
+            ("part-1.parquet".to_string(), "https://example.com/part-1.parquet".to_string()),
+            ("part-2.parquet".to_string(), "https://example.com/part-2.parquet".to_string()),
+            ("part-3.parquet".to_string(), "https://example.com/part-3.parquet".to_string()),
+        ]),
+    };
+    chunk
+}
+
+pub(crate) fn get_test_chunk_111111_95_106() -> DataChunk {
+    let dataset_id_str = "1111111111111111111111111111111111111111111111111111111111111111";
+    let dataset_id_vec = hex::decode(dataset_id_str).unwrap();
+    let mut dataset_id = [0u8; 32];
+    dataset_id.copy_from_slice(&dataset_id_vec);
+    let block_range = 95..106;
+    let chunk_id = DataCatalogue::get_chunk_id_from_dataset_and_block_range(&dataset_id, &block_range);
+    let chunk = DataChunk {
+        id: chunk_id,
+        dataset_id: dataset_id,
+        block_range: block_range,
+        files: HashMap::from([
+            ("part-1.parquet".to_string(), "https://example.com/part-1.parquet".to_string()),
+            ("part-2.parquet".to_string(), "https://example.com/part-2.parquet".to_string()),
+            ("part-3.parquet".to_string(), "https://example.com/part-3.parquet".to_string()),
+        ]),
+    };
+    chunk
+}
+
+pub(crate) fn get_test_chunk_111111_107_135() -> DataChunk {
+    let dataset_id_str = "1111111111111111111111111111111111111111111111111111111111111111";
+    let dataset_id_vec = hex::decode(dataset_id_str).unwrap();
+    let mut dataset_id = [0u8; 32];
+    dataset_id.copy_from_slice(&dataset_id_vec);
+    let block_range = 107..135;
+    let chunk_id = DataCatalogue::get_chunk_id_from_dataset_and_block_range(&dataset_id, &block_range);
+    let chunk = DataChunk {
+        id: chunk_id,
+        dataset_id: dataset_id,
+        block_range: block_range,
+        files: HashMap::from([
+            ("part-1.parquet".to_string(), "https://example.com/part-1.parquet".to_string()),
+            ("part-2.parquet".to_string(), "https://example.com/part-2.parquet".to_string()),
+            ("part-3.parquet".to_string(), "https://example.com/part-3.parquet".to_string()),
+            ("part-4.parquet".to_string(), "https://example.com/part-4.parquet".to_string()),
+            ("part-5.parquet".to_string(), "https://example.com/part-5.parquet".to_string()),
+        ]),
+    };
+    chunk
 }

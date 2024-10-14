@@ -37,7 +37,7 @@ impl LocalDataSource {
                                     let block_start = parts.next().unwrap().parse::<u64>().unwrap();
                                     let block_end = parts.next().unwrap().parse::<u64>().unwrap();
                                     let range = block_start..block_end;
-                                    let chunk_id = DataCatalogue::get_chunk_id_from_dataset_and_block_range(&dataset_id, &range);
+                                    let chunk_id = DataCatalogue::generate_chunk_id(&dataset_id, &range);
                                     chunks.push(chunk_id);
                                 }
                             }
@@ -112,7 +112,7 @@ mod tests {
         dataset_id.copy_from_slice(&dataset_id_vec);
 
         let block_range = 95..106;
-        let chunk_id = DataCatalogue::get_chunk_id_from_dataset_and_block_range(&dataset_id, &block_range);
+        let chunk_id = DataCatalogue::generate_chunk_id(&dataset_id, &block_range);
         let chunk = DataChunk {
             id: chunk_id,
             dataset_id: dataset_id,
@@ -152,7 +152,7 @@ mod tests {
         dataset_id.copy_from_slice(&dataset_id_vec);
 
         let block_range = 95..106;
-        let chunk_id = DataCatalogue::get_chunk_id_from_dataset_and_block_range(&dataset_id, &block_range);
+        let chunk_id = DataCatalogue::generate_chunk_id(&dataset_id, &block_range);
         let chunk = DataChunk {
             id: chunk_id,
             dataset_id: dataset_id,
@@ -230,27 +230,7 @@ pub(crate) fn get_test_chunk_111111_0_35() -> DataChunk {
     let mut dataset_id = [0u8; 32];
     dataset_id.copy_from_slice(&dataset_id_vec);
     let block_range = 0..35;
-    let chunk_id = DataCatalogue::get_chunk_id_from_dataset_and_block_range(&dataset_id, &block_range);
-    let chunk = DataChunk {
-        id: chunk_id,
-        dataset_id: dataset_id,
-        block_range: block_range,
-        files: HashMap::from([
-            ("part-1.parquet".to_string(), "https://example.com/part-1.parquet".to_string()),
-            ("part-2.parquet".to_string(), "https://example.com/part-2.parquet".to_string()),
-            ("part-3.parquet".to_string(), "https://example.com/part-3.parquet".to_string()),
-        ]),
-    };
-    chunk
-}
-
-pub(crate) fn get_test_chunk_111111_36_94() -> DataChunk {
-    let dataset_id_str = "1111111111111111111111111111111111111111111111111111111111111111";
-    let dataset_id_vec = hex::decode(dataset_id_str).unwrap();
-    let mut dataset_id = [0u8; 32];
-    dataset_id.copy_from_slice(&dataset_id_vec);
-    let block_range = 36..94;
-    let chunk_id = DataCatalogue::get_chunk_id_from_dataset_and_block_range(&dataset_id, &block_range);
+    let chunk_id = DataCatalogue::generate_chunk_id(&dataset_id, &block_range);
     let chunk = DataChunk {
         id: chunk_id,
         dataset_id: dataset_id,
@@ -270,7 +250,7 @@ pub(crate) fn get_test_chunk_111111_95_106() -> DataChunk {
     let mut dataset_id = [0u8; 32];
     dataset_id.copy_from_slice(&dataset_id_vec);
     let block_range = 95..106;
-    let chunk_id = DataCatalogue::get_chunk_id_from_dataset_and_block_range(&dataset_id, &block_range);
+    let chunk_id = DataCatalogue::generate_chunk_id(&dataset_id, &block_range);
     let chunk = DataChunk {
         id: chunk_id,
         dataset_id: dataset_id,
@@ -290,7 +270,7 @@ pub(crate) fn get_test_chunk_111111_107_135() -> DataChunk {
     let mut dataset_id = [0u8; 32];
     dataset_id.copy_from_slice(&dataset_id_vec);
     let block_range = 107..135;
-    let chunk_id = DataCatalogue::get_chunk_id_from_dataset_and_block_range(&dataset_id, &block_range);
+    let chunk_id = DataCatalogue::generate_chunk_id(&dataset_id, &block_range);
     let chunk = DataChunk {
         id: chunk_id,
         dataset_id: dataset_id,

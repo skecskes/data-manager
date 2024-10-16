@@ -5,7 +5,7 @@ use crate::data_catalogue::{ChunkStatus, DataCatalogue};
 use crate::data_chunk::{ChunkId, DataChunk, DatasetId};
 use crate::data_manager::DataManager;
 use crate::event_loop::TasksManager;
-use crate::local_data_source::LocalDataSource;
+use crate::local_data_source::{LocalDataSource, LOCAL_DATA_DIR};
 
 pub mod data_chunk;
 mod data_manager;
@@ -19,6 +19,12 @@ pub struct DataManagerImpl {
     pub data_source: LocalDataSource,
     pub tasks_manager: TasksManager,
     pub data_catalogue: DataCatalogue,
+}
+
+impl DataManagerImpl {
+    fn default() -> Self {
+        Self::new(PathBuf::from(LOCAL_DATA_DIR))
+    }
 }
 
 impl DataManager for DataManagerImpl {

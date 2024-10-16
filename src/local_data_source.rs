@@ -5,6 +5,8 @@ use std::{fs, thread};
 use std::collections::HashMap;
 use crate::data_catalogue::DataCatalogue;
 
+pub const LOCAL_DATA_DIR: &str = "./local_data_dir";
+
 #[derive(Clone)]
 pub struct LocalDataSource {
     pub data_dir: PathBuf,
@@ -14,8 +16,12 @@ impl LocalDataSource {
     pub fn new(data_dir: PathBuf) -> Self {
         LocalDataSource { data_dir }
     }
-    
-    pub fn read_local_chunks(&self) -> Vec<ChunkId> {
+
+    pub fn get_local_chunk_ids(&self) -> Vec<ChunkId> {
+        self.get_local_chunks().iter().map(|chunk| chunk.id).collect()
+    }
+
+    pub fn get_local_chunks(&self) -> Vec<DataChunk> {
         let mut chunks = Vec::new();
 
         // chunk id is concatenated dataset_id and block_range hashed with sha256 into [u8; 32]
@@ -27,6 +33,14 @@ impl LocalDataSource {
                         for dataset_directory in entry.path().read_dir().unwrap() {
                             if let Ok(block_range_directory) = dataset_directory.unwrap().file_name().into_string() {
                                 if block_range_directory.contains("=") {
+
+                                    let mut files = HashMap::new();
+                                    for file in fs::read_dir(format!("{}/{}/{}", &self.data_dir.display(), main_directory, block_range_directory)).unwrap() {
+                                        let file = file.unwrap();
+                                        let file_name = file.file_name().into_string().unwrap();
+                                        let file_path = file.path().into_os_string().into_string().unwrap();
+                                        files.insert(file_name, file_path);
+                                    }
                                     let dataset_id_str = main_directory.split("=").nth(1).unwrap();
                                     let dataset_id_vec = hex::decode(dataset_id_str).unwrap();
                                     let mut dataset_id = [0u8; 32];
@@ -38,24 +52,27 @@ impl LocalDataSource {
                                     let block_end = parts.next().unwrap().parse::<u64>().unwrap();
                                     let range = block_start..block_end;
                                     let chunk_id = DataCatalogue::generate_chunk_id(&dataset_id, &range);
-                                    chunks.push(chunk_id);
+                                    let data_chunk = DataChunk {
+                                        id: chunk_id,
+                                        dataset_id: dataset_id,
+                                        block_range: range,
+                                        files: files,
+                                    };
+                                    chunks.push(data_chunk);
                                 }
                             }
-
                         }
                     }
                 }
             }
         }
-
-        
         chunks
     }
 
     /// Download the all the chunks to the local_data_dir
     pub fn download_chunk(data_dir: PathBuf, chunk: DataChunk) -> String {
+        // the actual work of downloading the chunk happens here
         simulate_downloading_chunk(data_dir.clone(), chunk.clone());
-       // @todo: Implement the actual deletion of the chunk
         format!(
             "Downloading the chunk {:?} to {} has completed",
             chunk.id,
@@ -65,8 +82,8 @@ impl LocalDataSource {
 
     /// Simulate deleting the chunk by waiting for 100ms
     pub fn delete_chunk(data_dir: PathBuf, chunk_id: ChunkId) -> String {
+        // the actual work of deleting the chunk happens here
         simulate_deleting_chunk(&data_dir, &chunk_id);
-        // @todo: Implement the actual deletion of the chunk
         format!("Deleting the chunk {:?} from {} has completed", chunk_id, data_dir.display())
     }
 }
@@ -79,15 +96,15 @@ mod tests {
 
     #[test]
     fn test_instantiate_local_data_source() {
-        let ds = LocalDataSource::new(PathBuf::from("./local_data_dir"));
-        assert_eq!(ds.data_dir, PathBuf::from("./local_data_dir"));
+        let ds = LocalDataSource::new(PathBuf::from(LOCAL_DATA_DIR));
+        assert_eq!(ds.data_dir, PathBuf::from(LOCAL_DATA_DIR));
     }
 
     #[test]
     fn test_list_files_as_chunk_ids() {
         // Act
-        let ds = LocalDataSource::new(PathBuf::from("./local_data_dir"));
-        let chunk_ids = ds.read_local_chunks();
+        let ds = LocalDataSource::new(PathBuf::from(LOCAL_DATA_DIR));
+        let chunk_ids = ds.get_local_chunk_ids();
 
         // Assert
         assert_eq!(chunk_ids.len(), 8);
@@ -105,7 +122,7 @@ mod tests {
     #[serial]
     fn test_download_chunk() {
         // Arrange
-        let ds = LocalDataSource::new(PathBuf::from("./local_data_dir"));
+        let ds = LocalDataSource::new(PathBuf::from(LOCAL_DATA_DIR));
         let dataset_id_str = "1111111111111111111111111111111111111111111111111111111111111111";
         let dataset_id_vec = hex::decode(dataset_id_str).unwrap();
         let mut dataset_id = [0u8; 32];
@@ -133,7 +150,7 @@ mod tests {
             "Downloading the chunk [170, 13, 118, 225, 28, 2, 234, 149, 141, 239, 145, 9, 120, 116, 116, 137, 16, 29, 106, 129, 18, 70, 73, 152, 183, 85, 25, 49, 33, 116, 247, 65] to ./local_data_dir has completed"
         );
 
-        let chunk_ids = ds.read_local_chunks();
+        let chunk_ids = ds.get_local_chunk_ids();
         assert_eq!(chunk_ids.len(), 9);
 
         assert!(chunk_ids.contains(&chunk.id));
@@ -145,7 +162,7 @@ mod tests {
     #[serial]
     fn test_delete_chunk() {
         // Arrange
-        let ds = LocalDataSource::new(PathBuf::from("./local_data_dir"));
+        let ds = LocalDataSource::new(PathBuf::from(LOCAL_DATA_DIR));
         let dataset_id_str = "1111111111111111111111111111111111111111111111111111111111111111";
         let dataset_id_vec = hex::decode(dataset_id_str).unwrap();
         let mut dataset_id = [0u8; 32];
@@ -164,7 +181,7 @@ mod tests {
             ]),
         };
         simulate_downloading_chunk(ds.data_dir.clone(), chunk.clone());
-        let chunk_ids = ds.read_local_chunks();
+        let chunk_ids = ds.get_local_chunk_ids();
         assert_eq!(chunk_ids.len(), 9);
         assert!(chunk_ids.contains(&chunk.id));
 
@@ -177,7 +194,7 @@ mod tests {
             "Deleting the chunk [170, 13, 118, 225, 28, 2, 234, 149, 141, 239, 145, 9, 120, 116, 116, 137, 16, 29, 106, 129, 18, 70, 73, 152, 183, 85, 25, 49, 33, 116, 247, 65] from ./local_data_dir has completed"
         );
 
-        let chunk_ids = ds.read_local_chunks();
+        let chunk_ids = ds.get_local_chunk_ids();
         assert_eq!(chunk_ids.len(), 8);
         assert!(!chunk_ids.contains(&chunk.id));
     }

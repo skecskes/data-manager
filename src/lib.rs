@@ -1,7 +1,8 @@
+use crate::data_chunk::{DataChunkPath, DataChunkRef};
 use std::path::PathBuf;
 use std::thread;
 use crate::data_catalogue::{ChunkStatus, DataCatalogue};
-use crate::data_chunk::{ChunkId, DataChunk, DataChunkRef, DatasetId};
+use crate::data_chunk::{ChunkId, DataChunk, DatasetId};
 use crate::data_manager::DataManager;
 use crate::event_loop::TasksManager;
 use crate::local_data_source::LocalDataSource;
@@ -14,7 +15,6 @@ mod event_loop;
 mod data_catalogue;
 
 
-
 pub struct DataManagerImpl {
     pub data_source: LocalDataSource,
     pub tasks_manager: TasksManager,
@@ -24,12 +24,12 @@ pub struct DataManagerImpl {
 impl DataManager for DataManagerImpl {
     fn new(data_dir: PathBuf) -> Self {
         let data_source = LocalDataSource::new(data_dir);
-        let local_chunk_ids = data_source.read_local_chunks();
+        let local_chunks = data_source.get_local_chunks();
 
         DataManagerImpl {
             data_source,
             tasks_manager: TasksManager::default(),
-            data_catalogue: DataCatalogue::new(local_chunk_ids),
+            data_catalogue: DataCatalogue::new(local_chunks),
         }
     }
 
@@ -44,11 +44,11 @@ impl DataManager for DataManagerImpl {
         let data_dir = self.data_source.data_dir.clone();
         let data_catalogue = self.data_catalogue.clone();
         thread::spawn(move || {
-                let result = LocalDataSource::download_chunk(data_dir, chunk.clone());
-                TasksManager::wake_the_future(task_waker);
-                data_catalogue.update_chunk(&chunk, &ChunkStatus::Ready);
-                result
-            }
+            let result = LocalDataSource::download_chunk(data_dir, chunk.clone());
+            TasksManager::wake_the_future(task_waker);
+            data_catalogue.update_chunk(&chunk, &ChunkStatus::Ready);
+            result
+        }
         );
     }
 
@@ -57,8 +57,12 @@ impl DataManager for DataManagerImpl {
         self.data_catalogue.get_ready_chunk_ids()
     }
 
+    /// Find a chunk from a given dataset, that is responsible for `block_number`.
     fn find_chunk(&self, dataset_id: DatasetId, block_number: u64) -> Option<impl DataChunkRef> {
-        self.data_catalogue.find_chunk(&dataset_id, block_number)
+        match self.data_catalogue.find_chunk(&dataset_id, block_number) {
+            Some(chunk) => Some(DataChunkPath::new(chunk)),
+            None => None,
+        }
     }
 
     fn delete_chunk(&self, chunk_id: ChunkId) {
@@ -83,9 +87,8 @@ impl DataManager for DataManagerImpl {
                         data_catalogue.update_chunk(&chunk, &ChunkStatus::Deleted);
                         result
                     }
-
                 });
-            },
+            }
             None => {
                 // don't try to delete the chunk if it doesn't exist
                 return;
@@ -96,14 +99,16 @@ impl DataManager for DataManagerImpl {
 
 #[cfg(test)]
 mod tests {
+    use crate::local_data_source::LOCAL_DATA_DIR;
     use serial_test::serial;
+    use crate::data_catalogue::load_catalogue_with_local_chunks;
     use crate::local_data_source::{get_test_chunk_111111_0_35, get_test_chunk_111111_107_135, get_test_chunk_111111_95_106};
     use super::*;
 
     #[test]
     #[serial]
     fn test_instantiate_data_manager() {
-        let data_manager = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
+        let data_manager = DataManagerImpl::new(PathBuf::from(LOCAL_DATA_DIR));
         let registry = data_manager.data_catalogue.registry.read().unwrap();
         assert_eq!(registry.len(), 8);
         assert!(registry.contains_key(&[147, 161, 202, 94, 141, 129, 235, 161, 211, 123, 214, 159, 212, 119, 7, 59, 107, 144, 48, 224, 108, 245, 142, 139, 2, 173, 240, 231, 54, 58, 115, 159]));
@@ -114,13 +119,12 @@ mod tests {
         assert!(registry.contains_key(&[47, 214, 124, 127, 237, 100, 240, 96, 40, 147, 96, 68, 104, 154, 218, 127, 165, 181, 128, 44, 47, 16, 60, 172, 24, 208, 88, 136, 149, 79, 243, 191]));
         assert!(registry.contains_key(&[56, 24, 248, 27, 82, 241, 162, 191, 1, 219, 253, 77, 160, 250, 121, 88, 143, 116, 109, 77, 123, 216, 197, 83, 201, 51, 240, 120, 186, 231, 249, 76]));
         assert!(registry.contains_key(&[168, 77, 161, 67, 100, 46, 30, 66, 3, 236, 122, 88, 18, 185, 131, 120, 153, 130, 152, 113, 236, 29, 91, 3, 244, 6, 254, 177, 61, 66, 182, 178]));
-
     }
 
     #[test]
     #[serial]
     fn test_list_chunks() {
-        let data_manager = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
+        let data_manager = DataManagerImpl::new(PathBuf::from(LOCAL_DATA_DIR));
         let chunk_ids = data_manager.list_chunks();
         assert_eq!(chunk_ids.len(), 8);
     }
@@ -129,7 +133,8 @@ mod tests {
     #[serial]
     fn test_download_new_chunk() {
         // Arrange
-        let data_manager = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
+        load_catalogue_with_local_chunks();
+        let data_manager = DataManagerImpl::new(PathBuf::from(LOCAL_DATA_DIR));
         let chunk = get_test_chunk_111111_95_106();
 
         // Assert initial state
@@ -174,7 +179,8 @@ mod tests {
     #[serial]
     fn test_download_existing_chunk() {
         // Arrange
-        let data_manager = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
+        load_catalogue_with_local_chunks();
+        let data_manager = DataManagerImpl::new(PathBuf::from(LOCAL_DATA_DIR));
         let chunk = get_test_chunk_111111_0_35();
         {
             let registry = data_manager.data_catalogue.registry.read().unwrap();
@@ -196,7 +202,8 @@ mod tests {
     #[serial]
     fn test_delete_existing_chunk() {
         // Arrange
-        let data_dir = PathBuf::from("./local_data_dir");
+        load_catalogue_with_local_chunks();
+        let data_dir = PathBuf::from(LOCAL_DATA_DIR);
         let data_manager = DataManagerImpl::new(data_dir);
         let chunk = get_test_chunk_111111_107_135();
         {
@@ -235,7 +242,8 @@ mod tests {
     #[serial]
     fn test_delete_non_existing_chunk() {
         // Arrange
-        let data_manager = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
+        load_catalogue_with_local_chunks();
+        let data_manager = DataManagerImpl::new(PathBuf::from(LOCAL_DATA_DIR));
         let chunk_id = [3u8; 32];
         {
             let registry = data_manager.data_catalogue.registry.read().unwrap();
@@ -258,12 +266,12 @@ mod tests {
     #[serial]
     fn test_delete_not_ready_chunk() {
         // Arrange
-        let data_manager = DataManagerImpl::new(PathBuf::from("./local_data_dir"));
+        load_catalogue_with_local_chunks();
+        let data_manager = DataManagerImpl::new(PathBuf::from(LOCAL_DATA_DIR));
         let chunk = get_test_chunk_111111_0_35();
         {
             let registry = data_manager.data_catalogue.registry.read().unwrap();
             assert_eq!(registry.len(), 8);
-
         }
         // chunk that is in downloading or deleting state can't be deleted again.
         data_manager.data_catalogue.update_chunk(&chunk, &ChunkStatus::Deleting);
@@ -278,6 +286,54 @@ mod tests {
             assert_eq!(registry.len(), 8);
             assert_eq!(registry.get(&chunk.id).unwrap().status, ChunkStatus::Deleting);
         }
+    }
+
+    #[test]
+    #[serial]
+    fn test_find_chunk() {
+        // Arrange
+        load_catalogue_with_local_chunks();
+        let data_manager = DataManagerImpl::new(PathBuf::from(LOCAL_DATA_DIR));
+        let dataset_id = [17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17];
+        let block_number = 12;  // we have blocks 0..35 & 36..94
+
+        // Act
+        let chunk = data_manager.find_chunk(dataset_id, block_number).unwrap();
+
+        // Assert
+        assert_eq!(chunk.path().to_str().unwrap(), "./local_data_dir/dataset_id=1111111111111111111111111111111111111111111111111111111111111111/block_range=0_35/");
+    }
+
+    #[test]
+    #[serial]
+    fn test_find_another_chunk() {
+        // Arrange
+        load_catalogue_with_local_chunks();
+        let data_manager = DataManagerImpl::new(PathBuf::from(LOCAL_DATA_DIR));
+        let dataset_id = [17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17];
+        let block_number = 45;  // we have blocks 0..35 & 36..94
+
+        // Act
+        let chunk = data_manager.find_chunk(dataset_id, block_number).unwrap();
+
+        // Assert
+        assert_eq!(chunk.path().to_str().unwrap(), "./local_data_dir/dataset_id=1111111111111111111111111111111111111111111111111111111111111111/block_range=36_94/");
+    }
+
+    #[test]
+    #[serial]
+    fn test_cant_find_not_registered_chunk() {
+        // Arrange
+        load_catalogue_with_local_chunks();
+        let data_manager = DataManagerImpl::new(PathBuf::from(LOCAL_DATA_DIR));
+        let dataset_id = [17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17];
+        let block_number = 300;  // we have blocks 0..35 & 36..94
+
+        // Act
+        let chunk = data_manager.find_chunk(dataset_id, block_number);
+
+        // Assert
+        assert!(chunk.is_none());
     }
 }
 

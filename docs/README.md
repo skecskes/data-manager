@@ -25,7 +25,7 @@ An async task for background operations
 - basically this is async wrapper for tasks that needs to be done in background
 
 Image, because it's better describing than words:
-![Tasks Manager](task manager.png)
+![Tasks Manager](task%20manager.png)
 
 
 # Data Catalogue

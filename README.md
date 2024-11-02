@@ -1,6 +1,6 @@
-# Rust engineer take away
+# Data Manager Worker
 
-Subsquid Network is a data lake, that stores and serves queries to blockchain data.
+We need to manage a data lake, that stores and serves queries to blockchain data.
 
 The data is divided into chunks. Each chunk corresponds to particular blockchain and block range,
 and stores block related data.
@@ -8,7 +8,7 @@ and stores block related data.
 There is a set of workers. Each worker downloads an assigned subset of data chunks from a large persistent storage
 and is responsible for serving queries to assigned data.
 
-Your task is to develop the data management component of a worker, that has the following interface:
+This is a data management component of a worker, with the following interface:
 
 ```rust
 use std::collections::HashMap;
@@ -64,11 +64,11 @@ pub trait DataChunkRef: Send + Sync + Clone {
 * `DataManager` functions must not block on IO or hold mutexes for a long time and should be cheap in general
 * `DataManager` must be reaching the desired state formed by download-delete call sequence in a fast and smooth manner
 * `DataManager` must make no assumptions about download-delete call sequence, except the one below
-* You may assume, that at any point of time there is enough disk space to hold the currently desired state
+* We assume, that at any point of time there is enough disk space to hold the currently desired state
 * Only fully downloaded chunks must be available for queries
 * Each chunk has approximate size of 200 MB and each worker can store up to 1 TB of data on disk.
 
-## Evaluation
 
-We will not run your code, and you are free to fill in trivial details with `todo!()` macro,
-nevertheless, we expect high level structure to be of a production quality and key ideas to be unequivocally expressed.
+## Implementation
+
+Read the documentation: [Data Manager](docs/README.md)
